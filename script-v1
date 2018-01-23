@@ -1,0 +1,992 @@
+
+# coding: utf-8
+
+# In[1]:
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import numpy as np
+import time
+
+
+# In[2]:
+
+start=time.time()
+
+
+# #  1 导入数据
+
+# In[3]:
+
+dfnopay=pd.read_csv("DataTech_Credit_Train_Communication1.txt") #用户违约类
+dfpred=pd.read_csv("DataTech_Credit_Train_User1.txt")  #题目提供的测试集，需分割训练和测试集合
+dfcomm=pd.read_csv("DataTech_公共数据_基础信息1.txt",encoding='utf-8',na_values=['\\N']) #用户基本信息。由于含有中文，需要指定utf-8编码，并指定空值类型
+dfcall=pd.read_csv("DataTech_公共数据_通话1.txt",encoding='utf-8',na_values=['\\N']) #用户通话类。由于含有中文，需要指定utf-8编码，并指定空值类型
+#dfnet=pd.read_csv("DataTech_公共数据_上网1.txt",encoding='utf-8',na_values=['\\N'])
+
+dfnopay.columns=["USERI_ID","Stop_Days","Stop_Cnt","date"]
+dfpred.columns=["USERI_ID","RISK_Flag"]
+dfcomm.columns=["USERI_ID", "AGE", "OCCUPATION_ID", "CITY_ID", "COUNTY_ID", "ONLINE_TIME", "REAL_NAME_FLAG", "USER_CREDIT_ID", "CALL_MARK", "COMM_FLAG", "CALL_COUNTS", "VPMN_CALL_COUNTS", "TOLL_COUNTS", "WJ_CALL_COUNTS", "OUT_CALL_COUNTS", "CALLFW_COUNTS", "QQW_CALL_COUNTS", "BD_CALL_COUNTS", "ROAM_COUNTS", "CALL_DURATION_M", "BILL_DURATION_M", "VPMN_CALL_DURATION_M", "WJ_CALL_DURATION_M", "OUT_CALL_DURATION_M", "CALLFW_DURATION_M", "BD_CALL_DURATION_M", "ROAM_DURATION_M", "TOLL_DURATION_M", "QQW_CALL_DURATION_M", "GPRS_VOLUME", "ARPU", "SP_FEE", "TELE_TYPE", "TELE_FAC", "SMART_SYSTEM", "FIST_USE_DATE", "NUM_OF_COMM", "date"]
+dfcall.columns=["USERI_ID", "OPP_USER_NUMBER", "START_TIME", "DURATION", "CALL_TYPE", "ROAM_TYPE", "HPLMN1", "HPLMN2", "VPLMN1", "VPLMN2", "OPP_HOME_AREACODE", "TOLL_TYPE", "industry", "serv_type"]
+#dfnet.columns=["USERI_ID", "TIME_FRAME", "FIRST_DOMAIN_NAME", "APP_NAME", "APP_CLASSIFY_TYPE"]
+
+
+# In[4]:
+
+dfpred.head()
+
+
+# In[5]:
+
+print("=======dfnopay======")
+dfnopay.info() #数据完整
+print("=======dfpred======")
+dfpred.info() #数据完整
+print("=======dfcomm======")
+dfcomm.info() #存在空值
+print("=======dfcall======")
+dfcall.info() #存在空值
+
+
+# In[6]:
+
+print("======dfnopay=======")
+print(dfnopay.isnull().sum())
+print("======dfpred=======")
+print(dfpred.isnull().sum())
+print("======dfcomm=======")
+print(dfcomm.isnull().sum())
+print("======dfcall=======")
+print(dfcall.isnull().sum())
+
+
+# #  2 数据处理
+
+# ## 2.1 空值处理
+
+# In[7]:
+
+#dfcomm=dfcomm.dropna() #直接删除存在空值的行
+
+
+# In[8]:
+
+dfcomm=dfcomm.fillna(dfcomm.median()) #用中位值填充数值型空值
+
+
+# In[9]:
+
+dfcomm=dfcomm.fillna("unknown") #用unknown填充字符串型空值
+
+
+# ## 2.2 类型转换 
+
+# In[10]:
+
+dfnopay["USERI_ID"]=dfnopay["USERI_ID"].astype("str")
+dfnopay["Stop_Days"]=dfnopay["Stop_Days"].astype("int")
+dfnopay["Stop_Cnt"]=dfnopay["Stop_Cnt"].astype("int")
+dfnopay["date"]=dfnopay["date"].astype("str")
+
+
+# In[11]:
+
+dfpred["USERI_ID"]=dfpred["USERI_ID"].astype("str")
+dfpred["RISK_Flag"]=dfpred["RISK_Flag"].astype("int")
+
+
+# In[12]:
+
+dfcomm["USERI_ID"]=dfcomm["USERI_ID"].astype("str")
+dfcomm["date"]=dfcomm["date"].astype("str")
+dfcomm["NUM_OF_COMM"]=dfcomm["NUM_OF_COMM"].astype("int")
+dfcomm["OCCUPATION_ID"]=dfcomm["OCCUPATION_ID"].astype("int")
+dfcomm["CITY_ID"]=dfcomm["CITY_ID"].astype("int")
+dfcomm["ONLINE_TIME"]=dfcomm["ONLINE_TIME"].astype("int")
+dfcomm["REAL_NAME_FLAG"]=dfcomm["REAL_NAME_FLAG"].astype("int")
+dfcomm["USER_CREDIT_ID"]=dfcomm["USER_CREDIT_ID"].astype("int")
+dfcomm["CALL_MARK"]=dfcomm["CALL_MARK"].astype("int")
+dfcomm["FIST_USE_DATE"]=dfcomm["FIST_USE_DATE"].astype("str")
+
+
+# In[13]:
+
+dfcall["USERI_ID"]=dfcall["USERI_ID"].astype("str")
+dfcall["START_TIME"]=dfcall["START_TIME"].astype("str")
+dfcall["ROAM_TYPE"]=dfcall["ROAM_TYPE"].astype("str")
+
+
+# # 3 特征提取
+
+# ## 3.1 特征1：信用历史（dfcred_f）
+
+# In[14]:
+
+#选择6月违约天数、违约次数，形成关键数据表dfnopay06
+dfcred_f=dfnopay[dfnopay.date=="201706"].drop('date',1)
+dfcred_f.columns=['USERI_ID', 'Stop_Days06', 'Stop_Cnt06']
+
+
+# In[15]:
+
+dfcred_f.head()
+
+
+# ## 3.2 特征2：身份特征（dfuser_f）
+
+# In[16]:
+
+userprofile=[
+            "USERI_ID", #用户ID
+            "AGE", #客户年龄
+#            "OCCUPATION_ID", #客户职业类型
+#            "CITY_ID", #归属地市
+#            "COUNTY_ID", #归属县市
+#            "ONLINE_TIME", #在网时长
+#            "REAL_NAME_FLAG", #是否实名认证
+            "USER_CREDIT_ID", #用户星级
+#            "CALL_MARK", #通话用户标识
+#            "TELE_TYPE", #终端型号
+#            "TELE_FAC", #终端品牌
+#            "SMART_SYSTEM", #终端操作系统
+            "FIST_USE_DATE", #终端首次使用时间
+           ]
+
+
+# In[17]:
+
+def monthdiff(date1):
+    year1=int(date1[0:4])
+#    year2=int(date2[0:4])
+    year2=2017
+    mon1=int(date1[4:6])
+#    mon2=int(date2[4:6])
+    mon2=7
+    return (year2-year1)*12+(mon2-mon1)
+
+
+# In[18]:
+
+dfuser_f=dfcomm[userprofile]
+dfuser_f.insert(1,"LAST_MONTH",pd.Series(map(monthdiff,dfuser_f.FIST_USE_DATE)))
+dfuser_f=dfuser_f.drop("FIST_USE_DATE",1)
+
+
+# In[19]:
+
+dfuser_f.head()
+
+
+# ## 3.3 特征3：消费能力（dfcons_f）
+
+# In[20]:
+
+consume=[
+    "USERI_ID",
+    "GPRS_VOLUME",
+    "ARPU",
+#    "SP_FEE",
+    "date"
+    ]
+
+
+# In[21]:
+
+dfcons_f=dfcomm[consume]
+
+
+# In[22]:
+
+# 提取4月、5月、6月的数据
+dfcons_f=round(dfcons_f.loc[(dfcons_f.date=="201704") | (dfcons_f.date=="201705") | (dfcons_f.date=="201706"),:].groupby(['USERI_ID'],axis=0).mean().reset_index())
+
+
+# In[23]:
+
+dfcons_f.head()
+
+
+# ## 3.4 特征4：人脉关系（dfsocial_f）
+
+# In[24]:
+
+socialnw=[
+    "USERI_ID",
+    "NUM_OF_COMM",
+    "date"
+]
+
+
+# In[25]:
+
+dfsocial_f=dfcomm[socialnw]
+
+
+# In[26]:
+
+# 提取4月、5月、6月的数据
+dfsocial_f=round(dfsocial_f.loc[(dfsocial_f.date=="201704") | (dfsocial_f.date=="201705") | (dfsocial_f.date=="201706"),:].groupby(['USERI_ID'],axis=0).mean().reset_index())
+
+
+# ## 3.5 特征5：语音通信行为（dfcall_f）
+
+# In[27]:
+
+callbehavior=[
+            "USERI_ID", #用户ID
+#            "COMM_FLAG", #通信标识
+#            "CALL_COUNTS", #通话次数
+#            "VPMN_CALL_COUNTS", #虚拟网通话次数
+            "TOLL_COUNTS", #长途通话次数
+            "WJ_CALL_COUNTS", #网外通话次数
+            "OUT_CALL_COUNTS", #被叫通话次数
+#            "CALLFW_COUNTS", #呼转通话次数
+            "QQW_CALL_COUNTS", #亲情网通话次数
+#            "BD_CALL_COUNTS", #本地通话次数
+            "ROAM_COUNTS", #漫游通话次数
+#            "CALL_DURATION_M", #通话时长_分钟
+#            "BILL_DURATION_M", #收费通话时长_分钟
+#            "VPMN_CALL_DURATION_M", #vpmn通话时长_分钟
+#            "WJ_CALL_DURATION_M", #网外通话时长_分钟
+#            "OUT_CALL_DURATION_M", #被叫通话时长_分钟
+#            "CALLFW_DURATION_M", #呼转通话时长_分钟
+#            "BD_CALL_DURATION_M", #非漫游通话时长_分钟
+#            "ROAM_DURATION_M", #漫游通话时长_分钟
+#            "TOLL_DURATION_M", #长话通话时长_分钟
+#            "QQW_CALL_DURATION_M", #亲情网通话时长_分钟
+            "date" #数据日期
+]
+
+
+# In[28]:
+
+dfcall_f=dfcomm[callbehavior]
+
+
+# In[29]:
+
+# 提取4月、5月、6月的数据
+dfcall_f=round(dfcall_f.loc[(dfcall_f.date=="201704") | (dfcall_f.date=="201705") | (dfcall_f.date=="201706"),:].groupby(['USERI_ID'],axis=0).mean().reset_index())
+
+
+# In[30]:
+
+dfcall_f.head()
+
+
+# ## 3.6 特征6：漫游行为（dfroam_f）
+
+# In[31]:
+
+roambehavior=[
+            "USERI_ID", #用户ID
+            "ROAM_TYPE"#漫游类型
+]
+dfroam_f=dfcall[roambehavior]
+dfroam_f=pd.concat([dfroam_f,pd.get_dummies(dfroam_f.ROAM_TYPE,prefix="R")],axis=1).drop('ROAM_TYPE',1).groupby(['USERI_ID'],axis=0).count().reset_index()
+#dfroam_f.columns=['USERI_ID','R0','R1','R4','R5','R6','R8']
+
+
+# In[32]:
+
+dfroam_f=dfroam_f.iloc[:,0:-1]
+
+
+# In[33]:
+
+dfroam_f.head()
+
+
+# In[34]:
+
+#仅仅找出被叫的漫游
+
+#roambehavior=[
+#            "USERI_ID", #用户ID
+#            "ROAM_TYPE",#漫游类型
+#            "CALL_TYPE",#呼叫类型
+#]
+#dfroam_f=dfcall[roambehavior]
+#dfroam_f=pd.concat([dfroam_f,pd.get_dummies(dfroam_f.ROAM_TYPE)],axis=1).drop('ROAM_TYPE',1).groupby(['USERI_ID','CALL_TYPE'],axis=0).sum().reset_index()
+#dfroam_f=dfroam_f[dfroam_f.CALL_TYPE==1].drop("CALL_TYPE",1)
+#dfroam_f.columns=['USERI_ID','R0','R1','R4','R5','R6','R8']
+
+
+# ## 3.7 特征7：上网行为（dfinternet_f)
+
+# In[35]:
+
+#netbehavior=[
+#    "USERI_ID",
+#    "APP_CLASSIFY_TYPE"
+#    ]
+
+
+# In[36]:
+
+#dfinternet_f=dfnet[netbehavior]
+
+
+# In[37]:
+
+#dfinternet_f=pd.concat([dfinternet_f,pd.get_dummies(dfinternet_f.APP_CLASSIFY_TYPE)],axis=1).drop('APP_CLASSIFY_TYPE',1).groupby(['USERI_ID'],axis=0).sum().reset_index()
+
+
+# ## 3.8 特征8：主被叫次数（dfmomt_f）
+
+# In[38]:
+
+momtbehavior=[
+            "USERI_ID", #用户ID
+            "CALL_TYPE",#呼叫类型    
+]
+
+
+# In[39]:
+
+dfmomt_f=pd.concat([dfcall.loc[dfcall.CALL_TYPE==0,momtbehavior],dfcall.loc[dfcall.CALL_TYPE==1,momtbehavior]],axis=0)
+
+
+# In[40]:
+
+dfmomt_f=pd.concat([dfmomt_f,pd.get_dummies(dfmomt_f.CALL_TYPE)],axis=1).drop('CALL_TYPE',1).groupby(['USERI_ID'],axis=0).sum().reset_index()
+
+
+# In[41]:
+
+dfmomt_f.columns=['USERI_ID','MOCALL_COUNTS','MTCALL_COUNTS']
+
+
+# # 4 合并宽表
+
+# In[42]:
+
+#df=dfpred.merge(dfuser_f,on="USERI_ID",how="left").merge(dfcons_f,on="USERI_ID",how="left").merge(dfcall_f,on="USERI_ID",how="left").merge(dfroam_f,on="USERI_ID",how="left").merge(dfcred_f,on="USERI_ID",how="left").merge(dfsocial_f,on="USERI_ID",how="left").merge(dfinternet_f,on="USERI_ID",how="left")
+df=dfpred.merge(dfuser_f,on="USERI_ID",how="left").merge(dfcons_f,on="USERI_ID",how="left").merge(dfcall_f,on="USERI_ID",how="left").merge(dfroam_f,on="USERI_ID",how="left").merge(dfcred_f,on="USERI_ID",how="left").merge(dfsocial_f,on="USERI_ID",how="left").merge(dfmomt_f,on="USERI_ID",how="left")
+
+
+# In[43]:
+
+dfuserid=df.USERI_ID
+
+
+# In[44]:
+
+df=df.drop("USERI_ID",1).drop("R_5",1).drop("R_6",1)
+
+
+# ## 计算峰度偏度，并进行预处理
+
+# In[45]:
+
+#print(df.skew())
+#print("======")
+#print(df.kurt())
+
+
+# In[46]:
+
+#dfskew=df.skew()
+#dfskew=dfskew[dfskew>2]
+#dfskew=dfskew.index
+#print(dfskew)
+#df[dfskew]=np.log1p(df[dfskew])
+
+
+# In[47]:
+
+#print(df.skew())
+
+
+# In[48]:
+
+df=df.fillna(df.median()) #用中位值填充数值型空值
+
+
+# # 5 数据探索
+
+# In[49]:
+
+dfcorr=df.corr()
+plt.figure(figsize=(12,12))
+sns.heatmap(dfcorr)
+plt.show()
+
+
+# In[50]:
+
+dfcorr.RISK_Flag.sort_values()
+
+
+# In[51]:
+
+df.describe()
+
+
+# In[52]:
+
+temp1=pd.crosstab(round(df.ARPU), df.RISK_Flag)
+temp1.plot(kind='bar', stacked=True, color=['red','blue'], grid=False)
+
+temp2=pd.crosstab(round(df.NUM_OF_COMM), df.RISK_Flag)
+temp2.plot(kind='bar', stacked=True, color=['red','blue'], grid=False)
+
+temp3=pd.crosstab(round(df.GPRS_VOLUME), df.RISK_Flag)
+temp3.plot(kind='bar', stacked=True, color=['red','blue'], grid=False)
+
+temp5=pd.crosstab(df.Stop_Cnt06, df.RISK_Flag)
+temp5.plot(kind='bar', stacked=True, color=['red','blue'], grid=False)
+
+temp6=pd.crosstab(df.Stop_Days06, df.RISK_Flag)
+temp6.plot(kind='bar', stacked=True, color=['red','blue'], grid=False)
+plt.show()
+
+
+# In[53]:
+
+print(temp1)
+print(temp2)
+print(temp3)
+print(temp5)
+
+
+# #  6 数据建模
+
+# ## 6.1 测试验证集
+
+# In[54]:
+
+X_train,X_test,y_train,y_test=train_test_split(df.drop('RISK_Flag',1),df.RISK_Flag,test_size=0.25)
+
+
+# In[55]:
+
+print(X_train.shape,y_train.shape, X_test.shape, y_test.shape)
+
+
+# ## 6.2 模型训练验证
+
+# In[56]:
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier,ExtraTreesClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import classification_report,auc
+from sklearn.grid_search import GridSearchCV
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import GradientBoostingClassifier 
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import cohen_kappa_score
+from sklearn import cross_validation, metrics
+from pprint import pprint
+from sklearn import tree
+import xgboost as xgb
+
+
+# ### 模型：决策树
+
+# In[57]:
+
+clf_tree=DecisionTreeClassifier()
+clf_tree.fit(X_train,y_train)
+score_tree=cross_val_score(clf_tree,X_test,y_test,cv=10).mean()
+clf_tree.feature_importances_
+y_pred_tree=clf_tree.predict(X_test)
+ck_tree=cohen_kappa_score(y_test, y_pred_tree)
+print(score_tree)
+print(classification_report(y_test, y_pred_tree))
+print(ck_tree)
+
+
+# In[58]:
+
+error_count_tree = sum(y_test != (y_pred_tree))
+error_rate_tree = float(error_count_tree) / len(y_pred_tree)
+fpr_tree, tpr_tree, thresholds_tree = metrics.roc_curve(y_test, y_pred_tree)
+auc_tree=metrics.auc(fpr_tree, tpr_tree)
+
+print("样本总数：\t", len(y_pred_tree))
+print("错误数目：\t%4d" % error_count_tree)
+print("错误率：\t%.2f%%" % (100 * error_rate_tree))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_tree)))
+print("AUC：\t%.2f%%" % (100 * auc_tree))
+
+
+# In[59]:
+
+#with open("dt2.dot", 'w') as f:
+#    dot_data = tree.export_graphviz(clf_tree, out_file=f, 
+#                     feature_names=X_train.columns,  
+#                     class_names="RISK",  
+#                     filled=True, rounded=True,  
+#                     special_characters=True)  
+
+
+# ### 模型：随机森林
+
+# In[60]:
+
+#==GRID SEARCH 1 FOR RANDFOREST:
+
+#parameters1 = {'n_estimators':[750, 760, 770, 780, 790, 800, 810, 820, 830, 840, 850, 860, 870, 880, 890, 900]}
+#grid_search = GridSearchCV(estimator=RandomForestClassifier(min_samples_split=100,min_samples_leaf=20,max_depth=8,max_features='sqrt' ,random_state=10),param_grid=parameters1, cv=5, scoring='roc_auc')
+
+#grid_search.fit(X_train,y_train)
+#grid_search.grid_scores_, grid_search.best_params_, grid_search.best_score_
+
+#([mean: 0.91561, std: 0.00299, params: {'n_estimators': 750},
+#  mean: 0.91563, std: 0.00298, params: {'n_estimators': 760},
+#  mean: 0.91562, std: 0.00299, params: {'n_estimators': 770},
+#  mean: 0.91563, std: 0.00299, params: {'n_estimators': 780},
+#  mean: 0.91563, std: 0.00299, params: {'n_estimators': 790},
+#  mean: 0.91564, std: 0.00298, params: {'n_estimators': 800},
+#  mean: 0.91564, std: 0.00298, params: {'n_estimators': 810},
+#  mean: 0.91563, std: 0.00298, params: {'n_estimators': 820},
+#  mean: 0.91562, std: 0.00297, params: {'n_estimators': 830},
+#  mean: 0.91561, std: 0.00297, params: {'n_estimators': 840},
+#  mean: 0.91560, std: 0.00296, params: {'n_estimators': 850},
+#  mean: 0.91560, std: 0.00297, params: {'n_estimators': 860},
+#  mean: 0.91561, std: 0.00298, params: {'n_estimators': 870},
+#  mean: 0.91560, std: 0.00298, params: {'n_estimators': 880},
+#  mean: 0.91559, std: 0.00299, params: {'n_estimators': 890},
+#  mean: 0.91560, std: 0.00298, params: {'n_estimators': 900}],
+# {'n_estimators': 800},
+# 0.9156393405184282)
+
+
+# In[61]:
+
+#==GRID SEARCH 2 FOR RANDFOREST:
+
+#parameters2 = {'max_depth':[3,5,7,9,11,13], 'min_samples_split':[50,70,90,110,130,150,170,190,210]}
+#grid_search = GridSearchCV(estimator=RandomForestClassifier(n_estimators= 800,max_features='sqrt' ,random_state=10),param_grid=parameters2, cv=5, scoring='roc_auc')
+
+#grid_search.fit(X_train,y_train)
+#grid_search.grid_scores_, grid_search.best_params_, grid_search.best_score_
+
+
+# In[62]:
+
+#==GRID SEARCH 3 FOR RANDFOREST:
+
+#param_test3 = {'max_features':[3,5,7,9,11,13],'min_samples_leaf':[10,20,30,40,50]}
+#grid_search = GridSearchCV(estimator = RandomForestClassifier(n_estimators= 800, max_depth=13,min_samples_split=50 ,oob_score=True, random_state=10),param_grid = param_test3, scoring='roc_auc',iid=False, cv=5)
+#grid_search.fit(X_train,y_train)
+#grid_search.grid_scores_, grid_search.best_params_, grid_search.best_score_
+
+
+# In[63]:
+
+#clf_rf=RandomForestClassifier(n_estimators=1000, max_depth=13,min_samples_split=50 ,oob_score=True, random_state=10,max_features=13,min_samples_leaf=10)
+clf_rf=RandomForestClassifier(n_estimators= 1000,max_features=5)
+clf_rf.fit(X_train,y_train)
+score_rf=cross_val_score(clf_rf,X_test,y_test,cv=10).mean()
+y_pred_rf=clf_rf.predict(X_test)
+ck_rf=cohen_kappa_score(y_test, y_pred_rf)
+print(score_rf)
+print(classification_report(y_test, y_pred_rf))
+print(ck_rf)
+
+
+# In[64]:
+
+error_count_rf = sum(y_test != (y_pred_rf))
+error_rate_rf = float(error_count_rf) / len(y_pred_rf)
+fpr_rf, tpr_rf, thresholds_rf = metrics.roc_curve(y_test, y_pred_rf)
+auc_rf=metrics.auc(fpr_rf, tpr_rf)
+
+print("样本总数：\t", len(y_pred_rf))
+print("错误数目：\t%4d" % error_count_rf)
+print("错误率：\t%.2f%%" % (100 * error_rate_rf))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_rf)))
+print("AUC：\t%.2f%%" % (100 * auc_rf))
+
+
+# In[65]:
+
+importances = clf_rf.feature_importances_
+#features = df.columns[1:]
+features=df.drop('RISK_Flag',1).columns
+sort_indices = np.argsort(importances)[::-1]
+sorted_features = []
+for idx in sort_indices:
+    sorted_features.append(features[idx])
+plt.figure()
+plt.figure(figsize=(14,14))
+plt.bar(range(len(importances)), importances[sort_indices], align='center');
+plt.xticks(range(len(importances)), sorted_features, rotation='vertical');
+plt.xlim([-1, len(importances)])
+plt.grid(False)
+plt.show()
+
+result=pd.DataFrame({'factor':sorted_features,'weight':importances[sort_indices]})
+print(result)
+
+
+# ## 模型：支持向量机
+
+# In[66]:
+
+clf_svm=SVC(C=1)
+clf_svm.fit(X_train,y_train)
+score_svm=cross_val_score(clf_svm,X_test,y_test,cv=10).mean()
+print(score_svm)
+y_pred_svm=clf_svm.predict(X_test)
+ck_svm=cohen_kappa_score(y_test, y_pred_svm)
+print(classification_report(y_test, y_pred_svm))
+print(ck_svm)
+
+
+# In[67]:
+
+error_count_svm = sum(y_test != (y_pred_svm))
+error_rate_svm = float(error_count_svm) / len(y_pred_svm)
+fpr_svm, tpr_svm, thresholds_svm = metrics.roc_curve(y_test, y_pred_svm)
+auc_svm=metrics.auc(fpr_svm, tpr_svm)
+
+print("样本总数：\t", len(y_pred_svm))
+print("错误数目：\t%4d" % error_count_svm)
+print("错误率：\t%.2f%%" % (100 * error_rate_svm))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_svm)))
+print("AUC：\t%.2f%%" % (100 * auc_svm))
+
+
+# In[68]:
+
+#clf_svm=SVC()
+#parameters = {'C': [0.0001, 1]}
+#grid_search = GridSearchCV(estimator=clf_svm,param_grid=parameters, cv=10, scoring='accuracy')
+
+#print("parameters:")
+#pprint(parameters)
+#grid_search.fit(X_train,y_train)
+#print("Best score: %0.3f" % grid_search.best_score_)
+#print("Best parameters set:")
+#best_parameters=grid_search.best_estimator_.get_params()
+#for param_name in sorted(parameters.keys()):
+#    print("\t%s: %r" % (param_name, best_parameters[param_name]))
+
+
+# ## 模型：Ada Boost
+
+# In[69]:
+
+clf_ada=AdaBoostClassifier()
+clf_ada.fit(X_train,y_train)
+score_ada=cross_val_score(clf_ada,X_test,y_test,cv=10).mean()
+print(score_ada)
+clf_ada.feature_importances_
+y_pred_ada=clf_ada.predict(X_test)
+ck_ada=cohen_kappa_score(y_test, y_pred_ada)
+print(classification_report(y_test, y_pred_ada))
+print(ck_ada)
+
+
+# In[70]:
+
+error_count_ada = sum(y_test != (y_pred_ada))
+error_rate_ada = float(error_count_ada) / len(y_pred_ada)
+fpr_ada, tpr_ada, thresholds_ada = metrics.roc_curve(y_test, y_pred_ada)
+auc_ada=metrics.auc(fpr_ada, tpr_ada)
+
+print("样本总数：\t", len(y_pred_ada))
+print("错误数目：\t%4d" % error_count_ada)
+print("错误率：\t%.2f%%" % (100 * error_rate_ada))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_ada)))
+print("AUC：\t%.2f%%" % (100 * auc_ada))
+
+
+# ## 模型：朴素贝叶斯
+
+# In[71]:
+
+clf_nb=GaussianNB()
+clf_nb.fit(X_train,y_train)
+score_nb=cross_val_score(clf_nb,X_test,y_test,cv=10).mean()
+print(score_nb)
+y_pred_nb=clf_tree.predict(X_test)
+ck_nb=cohen_kappa_score(y_test, y_pred_nb)
+print(classification_report(y_test, y_pred_nb))
+print(ck_nb)
+
+
+# In[72]:
+
+error_count_nb = sum(y_test != (y_pred_nb))
+error_rate_nb = float(error_count_nb) / len(y_pred_nb)
+fpr_nb, tpr_nb, thresholds_nb = metrics.roc_curve(y_test, y_pred_nb)
+auc_nb=metrics.auc(fpr_nb, tpr_nb)
+
+print("样本总数：\t", len(y_pred_nb))
+print("错误数目：\t%4d" % error_count_nb)
+print("错误率：\t%.2f%%" % (100 * error_rate_nb))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_nb)))
+print("AUC：\t%.2f%%" % (100 * auc_nb))
+
+
+# ## 模型：GBDT(Gradient Boosting Decision Tree) Classifier  
+
+# In[73]:
+
+clf_gbdt=GradientBoostingClassifier(n_estimators=300)
+clf_gbdt.fit(X_train,y_train)
+score_gbdt=cross_val_score(clf_gbdt,X_test,y_test,cv=10).mean()
+print(score_gbdt)
+y_pred_gbdt=clf_gbdt.predict(X_test)
+ck_gbdt=cohen_kappa_score(y_test, y_pred_gbdt)
+print(classification_report(y_test, y_pred_gbdt))
+print(ck_gbdt)
+
+
+# In[74]:
+
+error_count_gbdt = sum(y_test != (y_pred_gbdt))
+error_rate_gbdt = float(error_count_gbdt) / len(y_pred_gbdt)
+fpr_gbdt, tpr_gbdt, thresholds_gbdt = metrics.roc_curve(y_test, y_pred_gbdt)
+auc_gbdt=metrics.auc(fpr_gbdt, tpr_gbdt)
+
+print("样本总数：\t", len(y_pred_gbdt))
+print("错误数目：\t%4d" % error_count_gbdt)
+print("错误率：\t%.2f%%" % (100 * error_rate_gbdt))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_gbdt)))
+print("AUC：\t%.2f%%" % (100 * auc_gbdt))
+
+
+# ## 模型：KNN
+
+# In[75]:
+
+clf_knn=KNeighborsClassifier(n_neighbors=10)
+clf_knn.fit(X_train,y_train)
+score_knn=cross_val_score(clf_knn,X_test,y_test,cv=10).mean()
+print(score_knn)
+y_pred_knn=clf_knn.predict(X_test)
+ck_knn=cohen_kappa_score(y_test, y_pred_knn)
+print(classification_report(y_test, y_pred_knn))
+print(ck_knn)
+
+
+# In[76]:
+
+error_count_knn = sum(y_test != (y_pred_knn))
+error_rate_knn = float(error_count_knn) / len(y_pred_knn)
+fpr_knn, tpr_knn, thresholds_knn = metrics.roc_curve(y_test, y_pred_knn)
+auc_knn=metrics.auc(fpr_knn, tpr_knn)
+
+print("样本总数：\t", len(y_pred_knn))
+print("错误数目：\t%4d" % error_count_knn)
+print("错误率：\t%.2f%%" % (100 * error_rate_knn))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_knn)))
+print("AUC：\t%.2f%%" % (100 * auc_knn))
+
+
+# ### knn模型结果可视化
+
+# In[77]:
+
+#from sklearn.manifold import TSNE
+
+
+# In[78]:
+
+#tsne=TSNE()
+#tsne.fit_transform(X_test)  #进行数据降维,降成两维
+#tsne=pd.DataFrame(tsne.embedding_,index=y_test)
+#d0=tsne.loc[y_pred_knn==0]
+#d1=tsne.loc[y_pred_knn==1]
+
+
+# In[79]:
+
+#plt.scatter(d0[0],d0[1],c='red')
+#plt.scatter(d1[0],d1[1],c='blue')
+#plt.show()
+
+
+# ## 模型：逻辑回归
+
+# In[80]:
+
+clf_log=LogisticRegression(C=0.1)
+clf_log.fit(X_train,y_train)
+score_log=cross_val_score(clf_log,X_test,y_test,cv=10).mean()
+print(score_log)
+y_pred_log=clf_log.predict(X_test)
+ck_log=cohen_kappa_score(y_test, y_pred_log)
+print(classification_report(y_test, y_pred_log))
+print(ck_log)
+
+
+# In[81]:
+
+error_count_log = sum(y_test != (y_pred_log))
+error_rate_log = float(error_count_log) / len(y_pred_log)
+fpr_log, tpr_log, thresholds_log = metrics.roc_curve(y_test, y_pred_log)
+auc_log=metrics.auc(fpr_log, tpr_log)
+
+print("样本总数：\t", len(y_pred_log))
+print("错误数目：\t%4d" % error_count_log)
+print("错误率：\t%.2f%%" % (100 * error_rate_log))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_log)))
+print("AUC：\t%.2f%%" % (100 * auc_log))
+
+
+# ## 模型：多隐层神经网络
+
+# In[82]:
+
+clf_nn = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=[20,20], random_state=1, activation='relu')
+clf_nn.fit(X_test, y_test)
+score_nn=cross_val_score(clf_nn,X_test,y_test,cv=10).mean()
+print(score_nn)
+y_pred_nn=clf_nn.predict(X_test)
+print(classification_report(y_test, y_pred_nn))
+ck_nn=cohen_kappa_score(y_test, y_pred_nn)
+print(ck_nn)
+
+
+# In[83]:
+
+error_count_nn = sum(y_test != (y_pred_nn))
+error_rate_nn = float(error_count_nn) / len(y_pred_nn)
+fpr_nn, tpr_nn, thresholds_nn = metrics.roc_curve(y_test, y_pred_nn)
+auc_nn=metrics.auc(fpr_nn, tpr_nn)
+
+print("样本总数：\t", len(y_pred_nn))
+print("错误数目：\t%4d" % error_count_nn)
+print("错误率：\t%.2f%%" % (100 * error_rate_nn))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_nn)))
+print("AUC：\t%.2f%%" % (100 * auc_nn))
+
+
+# ## 模型：xgboost
+
+# In[84]:
+
+from sklearn.datasets import dump_svmlight_file
+dump_svmlight_file(X_train, y_train, 'train.xgb')
+dump_svmlight_file(X_test, y_test, 'test.xgb')
+
+
+# In[85]:
+
+# 设置参数，参数的格式用map的形式存储
+param = {'max_depth': 10,                  # 树的最大深度
+         'eta': 1,                        # 一个防止过拟合的参数，默认0.3
+         'silent': 1,                     # 打印信息的繁简指标，1表示简， 0表示繁
+         'objective': 'binary:logistic'}  # 使用的模型，分类的数目
+num_round = 500  # 迭代的次数
+
+train = xgb.DMatrix('train.xgb')
+test = xgb.DMatrix('test.xgb')
+
+watchlist = [(test, 'eval'), (train, 'train')]# 看板，每次迭代都可以在控制台打印出训练集与测试集的损失
+
+clf_xgb=xgb.train(param, train, num_round, evals=watchlist)
+y_pred_xgb=clf_xgb.predict(test) # 做预测
+
+
+# In[86]:
+
+# 打印结果
+print(y_pred_xgb)
+
+error_xgboost = sum(y_test != (y_pred_xgb > 0.5))
+error_xgboost_rate = float(error_xgboost) / len(y_pred_xgb)
+score_xgboost='NA'
+ck_xgboost='NA'
+auc_xgboost='NA'
+print("样本总数：\t", len(y_pred_xgb))
+print("错误数目：\t%4d" % error_xgboost)
+print("错误率：\t%.2f%%" % (100 * error_xgboost_rate))
+print("精准度：\t%.2f%%" % (100 * (1-error_xgboost_rate)))
+
+
+# ## 模型：extremely random forest
+
+# In[87]:
+
+clf_extree=ExtraTreesClassifier(n_estimators= 1000,max_features=5)
+clf_extree.fit(X_train,y_train)
+score_extree=cross_val_score(clf_extree,X_test,y_test,cv=10).mean()
+y_pred_extree=clf_extree.predict(X_test)
+ck_extree=cohen_kappa_score(y_test, y_pred_extree)
+print(score_extree)
+print(classification_report(y_test, y_pred_extree))
+print(ck_extree)
+
+
+# In[88]:
+
+error_count_extree = sum(y_test != (y_pred_extree))
+error_rate_extree = float(error_count_extree) / len(y_pred_extree)
+fpr_extree, tpr_extree, thresholds_extree = metrics.roc_curve(y_test, y_pred_extree)
+auc_extree=metrics.auc(fpr_extree, tpr_extree)
+
+print("样本总数：\t", len(y_pred_extree))
+print("错误数目：\t%4d" % error_count_extree)
+print("错误率：\t%.2f%%" % (100 * error_rate_extree))
+print("精准度：\t%.2f%%" % (100 * (1-error_rate_extree)))
+print("AUC：\t%.2f%%" % (100 * auc_extree))
+
+
+# # 7 模型评估
+
+# In[89]:
+
+#result=pd.DataFrame({"0-Classifier":["Decision Tree","Random Forest","SVM","Ada boost","Gaussian NB","KNN","Log Regression","GBDT","Neural network","Extremely random forest"],"2-Accuracy":[score_tree,score_rf,score_svm,score_ada,score_nb,score_knn,score_log,score_gbdt,score_nn,score_extree],"4-kappa score":[ck_tree,ck_rf,ck_svm,ck_ada,ck_nb,ck_knn,ck_log,ck_gbdt,ck_nn,ck_extree],"1-AUC Score":[auc_tree,auc_rf,auc_svm,auc_ada,auc_nb,auc_knn,auc_log,auc_gbdt,auc_nn,auc_extree],"3-NUM of error examples":[error_count_tree,error_count_rf,error_count_svm,error_count_ada,error_count_nb,error_count_knn,error_count_log,error_count_gbdt,error_count_nn,error_count_extree]})
+result=pd.DataFrame({"0-Classifier":["Decision Tree","Random Forest","SVM","Ada boost","Gaussian NB","KNN","Log Regression","GBDT","Neural network","Extremely random forest","xgboost"],"2-Accuracy":[score_tree,score_rf,score_svm,score_ada,score_nb,score_knn,score_log,score_gbdt,score_nn,score_extree,score_xgboost],"4-kappa score":[ck_tree,ck_rf,ck_svm,ck_ada,ck_nb,ck_knn,ck_log,ck_gbdt,ck_nn,ck_extree,ck_xgboost],"1-AUC Score":[auc_tree,auc_rf,auc_svm,auc_ada,auc_nb,auc_knn,auc_log,auc_gbdt,auc_nn,auc_extree,auc_xgboost],"3-NUM of error examples":[error_count_tree,error_count_rf,error_count_svm,error_count_ada,error_count_nb,error_count_knn,error_count_log,error_count_gbdt,error_count_nn,error_count_extree,error_xgboost]})
+result.columns=['Classifier','AUC Score','CV Accuracy','NUM of error examples','Kappa Score']
+result.sort_values("NUM of error examples",ascending=True)
+
+
+# In[90]:
+
+end=time.time()
+
+
+# In[91]:
+
+print("Using time(s): %.2f " %(end-start))
+
+
+# ## 变量权重
+
+# In[92]:
+
+from sklearn.feature_selection import RFE  
+from sklearn.linear_model import LinearRegression  
+    
+#use linear regression as the model  
+lr = LinearRegression()  
+#rank all features, i.e continue the elimination until the last one  
+rfe = RFE(lr, n_features_to_select=3)  
+rfe.fit(X_train,y_train)  
+  
+print ("Features sorted by their rank:")  
+dd=pd.DataFrame(sorted(zip(map(lambda x: round(x, 4), rfe.ranking_), X_train.columns)))
+dd
+
+
+# In[93]:
+
+def save_tofile(content,filename='/Users/user/Downloads/datatech.log',mode='a'):
+	file=open(filename,mode)
+	filetime=time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time()))
+	file.write(filetime+'\t'+str(content)+'\n')
+	file.close()
+
+
+# In[94]:
+
+result=pd.DataFrame({"0-Classifier":["Decision Tree","Random Forest","SVM","Ada boost","Gaussian NB","KNN","Log Regression","GBDT","Extremely random forest"],"2-Accuracy":[score_tree,score_rf,score_svm,score_ada,score_nb,score_knn,score_log,score_gbdt,score_extree],"4-kappa score":[ck_tree,ck_rf,ck_svm,ck_ada,ck_nb,ck_knn,ck_log,ck_gbdt,ck_extree],"1-AUC Score":[auc_tree,auc_rf,auc_svm,auc_ada,auc_nb,auc_knn,auc_log,auc_gbdt,auc_extree],"3-NUM of error examples":[error_count_tree,error_count_rf,error_count_svm,error_count_ada,error_count_nb,error_count_knn,error_count_log,error_count_gbdt,error_count_extree]})
+result.columns=['Classifier','AUC Score','CV Accuracy','NUM of error examples','Kappa Score']
+result.sort_values("NUM of error examples",ascending=True)
